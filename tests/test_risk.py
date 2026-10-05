@@ -116,17 +116,25 @@ def test_overall_follows_highest_area_and_has_three_jurisdictions():
     r = risk.analyze(card(license=lic("CC-BY-NC-4.0"), pii_included="미포함"))
     assert r.overall == Level.high
     assert [a.area for a in r.areas] == ["라이선스", "개인정보"]
+    assert "라이선스, 개인정보" in r.scope_note
     assert all([j.jurisdiction for j in a.jurisdictions] == ["한국", "미국", "EU"] for a in r.areas)
     assert "법률 자문이 아니" in r.scope_note
 
 
-def test_risk_api_roundtrip():
+def test_risk_api_roundtrip(monkeypatch):
+    from app import watchlists as wl
+
+    async def loader(client):
+        return wl.Index([], [wl.ListStatus("us_csl", "미국 통합 제재 목록(CSL)", "미국", False, error="offline")])
+
+    monkeypatch.setattr(main, "watch_cache", wl.IndexCache(loader))
+    monkeypatch.setattr(main, "settings", main.settings.__class__())
     c = TestClient(main.app)
     import asyncio
     saved = asyncio.run(main.store.save(card(license=lic("MIT"))))
     assert c.get(f"/api/datacards/{saved.id}/risk").status_code == 404
     r = c.post(f"/api/datacards/{saved.id}/risk")
     assert r.status_code == 200, r.text
-    assert r.json()["areas"][0]["area"] == "라이선스"
+    assert [a["area"] for a in r.json()["areas"]] == ["라이선스", "개인정보", "평판(제재)"]
     assert c.get(f"/api/datacards/{saved.id}/risk").json()["id"] == r.json()["id"]
     assert c.post("/api/datacards/nope/risk").status_code == 404
