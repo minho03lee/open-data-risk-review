@@ -138,3 +138,42 @@ def test_risk_api_roundtrip(monkeypatch):
     assert [a["area"] for a in r.json()["areas"]] == ["라이선스", "개인정보", "평판(제재)", "원본 계보"]
     assert c.get(f"/api/datacards/{saved.id}/risk").json()["id"] == r.json()["id"]
     assert c.post("/api/datacards/nope/risk").status_code == 404
+
+
+def test_lineage_then_selected_risk_api(monkeypatch):
+    import asyncio
+
+    from app import lineage as ln
+    from app import watchlists as wl
+
+    async def loader(client):
+        return wl.Index([], [wl.ListStatus("us_csl", "미국 통합 제재 목록(CSL)", "미국", False, error="offline")])
+
+    async def ups(c):
+        return [ln.Upstream(name="a/mid", kind="데이터셋", url="https://huggingface.co/datasets/a/mid"),
+                ln.Upstream(name="Common Crawl", kind="웹 크롤링")] if c.dataset.repo == "org/ds" else []
+
+    async def child(ref):
+        return DataCard(dataset=DatasetRef(platform=Platform.huggingface, repo=ref.repo, url=ref.url))
+
+    monkeypatch.setattr(main, "watch_cache", wl.IndexCache(loader))
+    monkeypatch.setattr(main, "settings", main.settings.__class__())
+    monkeypatch.setattr(main, "upstreams_for", ups)
+    monkeypatch.setattr(main, "build_child", child)
+    c = TestClient(main.app)
+    lineage_card = card(license=lic("MIT"))
+    lineage_card.id = "lineage-card"  # 공용 메모리 저장소의 다른 테스트와 겹치지 않게
+    lineage_card.dataset.repo = "org/ds"
+    saved = asyncio.run(main.store.save(lineage_card))
+    assert c.get(f"/api/datacards/{saved.id}/lineage").status_code == 404
+
+    m = c.post(f"/api/datacards/{saved.id}/lineage").json()
+    assert [n["name"] for n in m["nodes"]] == ["a/mid", "Common Crawl"] and m["nodes"][0]["status"] == "확인됨"
+    assert c.get(f"/api/datacards/{saved.id}/lineage").json()["id"] == m["id"]
+
+    none = c.post(f"/api/datacards/{saved.id}/risk", json={"node_ids": []}).json()
+    assert not any(n["analyzed"] for n in none["lineage"])
+    picked = c.post(f"/api/datacards/{saved.id}/risk", json={"node_ids": [m["nodes"][0]["id"]]}).json()
+    assert [n["analyzed"] for n in picked["lineage"]] == [True, False]
+    default = c.post(f"/api/datacards/{saved.id}/risk").json()  # 본문 없이: depth 1 이내 기본 선택
+    assert default["lineage"][0]["analyzed"] is True
