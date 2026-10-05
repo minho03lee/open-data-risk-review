@@ -162,7 +162,8 @@ def _match_finding(entity: Entity, m: Match) -> Finding:
     )
 
 
-def opinion(card: DataCard, index: Index, entities: list[Entity]) -> AreaOpinion:
+def opinion(card: DataCard, index: Index, entities: list[Entity], news: list[Finding] | None = None) -> AreaOpinion:
+    """news: 언론 보도 점검 결과(None이면 뉴스를 검색하지 않은 것)."""
     findings: list[Finding] = []
     loaded = index.loaded
     failed = [s for s in index.statuses if not s.ok]
@@ -206,6 +207,7 @@ def opinion(card: DataCard, index: Index, entities: list[Entity]) -> AreaOpinion
             evidence_url=prov.evidence_url, evidence_quote=quote,
             recommendation="모회사·자금 제공 관계와 해당 국가 규제(수출통제·데이터 국외 이전)를 확인하세요."))
 
+    findings += news or []
     level = worst([f.level for f in findings])
     recs = list(dict.fromkeys(f.recommendation for f in findings if f.recommendation and f.level != Level.low))
     return AreaOpinion(
@@ -213,8 +215,9 @@ def opinion(card: DataCard, index: Index, entities: list[Entity]) -> AreaOpinion
         summary=_summary(level, hits, bool(loaded)),
         where="데이터셋 제작·제공 주체와 확인된 관련 기관",
         jurisdictions=_jurisdictions(index, hits, bool(entities)),
-        not_checked=["언론 보도·부정 기사 검색 (뉴스 단계)", "의회 법안·행정명령 등 정책 동향", "감시·군사 기관 연관, 인권 이슈 지역 수집 여부",
-                     "미국 대량 민감 개인정보 이전 제한(DOJ 규칙)·AI 분야 대중 투자 규제 해당 여부", "모회사·자금 제공자 조사 (제작 문서에 적힌 경우만 대조)"],
+        not_checked=([] if news is not None else ["언론 보도·부정 기사 검색"]) + ["의회 법안·행정명령 등 정책 동향", "감시·군사 기관 연관, 인권 이슈 지역 수집 여부",
+                     "미국 대량 민감 개인정보 이전 제한(DOJ 규칙)·AI 분야 대중 투자 규제 해당 여부", "모회사·자금 제공자 조사 (제작 문서에 적힌 경우만 대조)"]
+        + (["최근 3개월을 넘는 과거 보도, 본문에만 나오는 보도"] if news is not None else []),
     )
 
 
