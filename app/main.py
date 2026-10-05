@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import extract
+from . import extract, risk
 from .config import settings
 from .connectors import CollectContext, collect
 from .identify import identify
@@ -120,6 +120,23 @@ async def get_card(card_id: str) -> DataCard:
     if card is None:
         raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다.")
     return card
+
+
+@app.post("/api/datacards/{card_id}/risk", dependencies=[Depends(require_token)])
+async def run_risk(card_id: str) -> risk.RiskReport:
+    """저장된 데이터 카드로 라이선스·개인정보 리스크를 (재)분석한다. 카드를 고친 뒤 다시 돌리면 반영된다."""
+    card = await store.get(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다.")
+    return await store.save_risk(risk.analyze(card))
+
+
+@app.get("/api/datacards/{card_id}/risk", dependencies=[Depends(require_token)])
+async def get_risk(card_id: str) -> risk.RiskReport:
+    report = await store.latest_risk(card_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="아직 리스크 분석을 하지 않았습니다.")
+    return report
 
 
 @app.patch("/api/datacards/{card_id}", dependencies=[Depends(require_token)])

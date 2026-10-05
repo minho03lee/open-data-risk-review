@@ -9,6 +9,7 @@ from typing import Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .models import DataCard
+from .risk import RiskReport
 
 
 class Store(Protocol):
@@ -16,11 +17,14 @@ class Store(Protocol):
     async def get(self, card_id: str) -> DataCard | None: ...
     async def update(self, card: DataCard) -> DataCard: ...
     async def recent(self, limit: int = 20) -> list[dict]: ...
+    async def save_risk(self, report: RiskReport) -> RiskReport: ...
+    async def latest_risk(self, card_id: str) -> RiskReport | None: ...
 
 
 class MemoryStore:
     def __init__(self) -> None:
         self._cards: dict[str, DataCard] = {}
+        self._risks: dict[str, RiskReport] = {}
 
     async def save(self, card: DataCard, created_by: str | None = None) -> DataCard:
         card = card.model_copy(update={"id": card.id or str(uuid.uuid4())})
@@ -37,6 +41,14 @@ class MemoryStore:
     async def recent(self, limit: int = 20) -> list[dict]:
         cards = sorted(self._cards.values(), key=lambda c: c.created_at, reverse=True)[:limit]
         return [_summary(c) for c in cards]
+
+    async def save_risk(self, report: RiskReport) -> RiskReport:
+        report = report.model_copy(update={"id": report.id or str(uuid.uuid4())})
+        self._risks[report.datacard_id] = report
+        return report
+
+    async def latest_risk(self, card_id: str) -> RiskReport | None:
+        return self._risks.get(card_id)
 
 
 def _summary(card: DataCard) -> dict:
@@ -123,6 +135,29 @@ class PostgresStore:
             )
             rows = await cur.fetchall()
         return [{"id": str(r[0]), "dataset_uid": r[1], "name": r[2], "created_at": r[3].isoformat()} for r in rows]
+
+
+    async def save_risk(self, report: RiskReport) -> RiskReport:
+        report = report.model_copy(update={"id": report.id or str(uuid.uuid4())})
+        async with await self._conn() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "insert into odr.risk_reports (id, datacard_id, report) values (%s, %s, %s::jsonb)",
+                (report.id, report.datacard_id, report.model_dump_json()),
+            )
+            await conn.commit()
+        return report
+
+    async def latest_risk(self, card_id: str) -> RiskReport | None:
+        try:
+            uuid.UUID(card_id)
+        except ValueError:
+            return None
+        async with await self._conn() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "select report from odr.risk_reports where datacard_id = %s order by created_at desc limit 1", (card_id,)
+            )
+            row = await cur.fetchone()
+        return RiskReport.model_validate(row[0]) if row else None
 
 
 def make_store(dsn: str | None) -> Store:

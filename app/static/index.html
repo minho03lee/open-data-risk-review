@@ -45,6 +45,15 @@
   code { font:12px ui-monospace, Menlo, monospace; background:var(--line); padding:1px 4px; border-radius:4px; }
   pre { white-space:pre-wrap; margin:0; font:12px ui-monospace, Menlo, monospace; }
   @media (max-width: 640px) { .field { grid-template-columns: 1fr; } }
+  .lv { display:inline-block; font-size:12px; font-weight:600; padding:1px 9px; border-radius:999px; color:#fff; white-space:nowrap; }
+  .lv-높음 { background:#b91c1c; } .lv-중간 { background:#c2410c; } .lv-낮음 { background:#15803d; } .lv-확인필요 { background:#57534e; }
+  .area { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:10px 0; }
+  .area h3 { margin:0 0 4px; font-size:16px; display:flex; gap:8px; align-items:center; }
+  .fnd { display:grid; grid-template-columns: 130px auto 1fr; gap:6px 12px; padding:8px 0; border-top:1px solid var(--line); font-size:14px; }
+  .fnd .rec { grid-column: 3; color:var(--muted); font-size:13px; }
+  .juris, .fnd { align-items:start; }
+  .juris { display:grid; grid-template-columns: 56px auto 1fr; gap:6px 12px; font-size:13px; padding:4px 0; }
+  @media (max-width: 640px) { .fnd, .juris { grid-template-columns: 1fr; } .fnd .rec { grid-column: 1; } }
   .notice { font-size:13px; color:var(--muted); border-left:3px solid var(--line); padding-left:10px; }
 </style>
 </head>
@@ -57,6 +66,7 @@
     <button type="submit">검토</button>
   </form>
   <div id="out"></div>
+  <div id="risk"></div>
   <div class="panel"><strong>최근 검토</strong><div id="recent" class="muted">불러오는 중…</div></div>
 </main>
 <script src="/static/render.js"></script>
@@ -81,7 +91,11 @@ async function api(path, opts = {}) {
 
 const esc = ODR.esc;
 
+let currentCard = null;
+
 function renderCard(card) {
+  currentCard = card;
+  $("#risk").innerHTML = "";
   let body = "", group = null;
   for (const [k, meta] of Object.entries(FIELDS)) {
     const f = card.fields[k] || {};
@@ -102,6 +116,49 @@ function renderCard(card) {
     ${needs ? `<div class="group">추가로 필요한 자료</div><ul>${needs}</ul>` : ""}
     ${body}
     <div class="group">출처</div><ul>${srcs}</ul></div>`;
+  loadRisk(card.id);
+}
+
+const lv = (l) => `<span class="lv lv-${esc(l).replace(/\s/g, "")}">${esc(l)}</span>`;
+
+function renderRisk(r) {
+  const areas = r.areas.map((a) => `<div class="area">
+    <h3>${esc(a.area)} ${lv(a.level)}</h3>
+    <div>${esc(a.summary)}</div>
+    <div class="muted">발생 지점: ${esc(a.where)}</div>
+    ${a.findings.map((f) => `<div class="fnd"><div><strong>${esc(f.check)}</strong></div><div>${lv(f.level)}</div>
+      <div>${esc(f.note)}${f.evidence_url ? ` <span class="src">근거: <a href="${esc(f.evidence_url)}" target="_blank" rel="noopener">${esc(ODR.shortUrl(f.evidence_url, 48))}</a></span>` : ""}</div>
+      ${f.recommendation ? `<div class="rec">권고: ${esc(f.recommendation)}</div>` : ""}</div>`).join("")}
+    ${a.recommendations.length ? `<div class="group">권고 조치</div><ul>${a.recommendations.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+    <div class="group">법역별 의견 (초안, 법무 검토 필요)</div>
+    ${a.jurisdictions.map((j) => `<div class="juris"><strong>${esc(j.jurisdiction)}</strong>${lv(j.level)}<div>${esc(j.note)}</div></div>`).join("")}
+    ${a.not_checked.length ? `<details><summary>아직 확인하지 않은 것 ${a.not_checked.length}건</summary><ul>${a.not_checked.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>` : ""}
+  </div>`).join("");
+  $("#risk").innerHTML = `<div class="panel"><h2 style="margin:0 0 4px;font-size:20px">리스크 분석 ${lv(r.overall)}</h2>
+    <div class="muted">분석 ${esc(ODR.fmtDate(r.created_at))} · 종합 등급은 가장 높은 영역을 따릅니다</div>
+    <p class="notice">${esc(r.scope_note)}</p>${areas}
+    <button class="secondary" id="rerun">카드를 고친 뒤 다시 분석</button></div>`;
+  $("#rerun").onclick = () => runRisk();
+}
+
+async function loadRisk(id) {
+  if (!id) return;
+  try { renderRisk(await api(`/api/datacards/${id}/risk`)); }
+  catch (e) {
+    if (e.status !== 404) return;
+    $("#risk").innerHTML = `<div class="panel"><strong>리스크 분석</strong>
+      <p class="muted">라이선스와 개인정보 리스크를 데이터 카드 기준으로 분석합니다.</p>
+      <button id="runrisk">라이선스·개인정보 리스크 분석</button></div>`;
+    $("#runrisk").onclick = () => runRisk();
+  }
+}
+
+async function runRisk() {
+  const id = currentCard && currentCard.id;
+  if (!id) return;
+  $("#risk").innerHTML = `<div class="panel muted">분석 중입니다…</div>`;
+  try { renderRisk(await api(`/api/datacards/${id}/risk`, { method: "POST" })); }
+  catch (e) { $("#risk").innerHTML = `<div class="panel">${esc(e.body?.detail || "분석에 실패했습니다.")}</div>`; }
 }
 
 function renderChoice(result) {
