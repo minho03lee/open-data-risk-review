@@ -9,6 +9,7 @@ from typing import Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .models import DataCard
+from .lineage import LineageMap
 from .risk import RiskReport
 
 
@@ -19,12 +20,15 @@ class Store(Protocol):
     async def recent(self, limit: int = 20) -> list[dict]: ...
     async def save_risk(self, report: RiskReport) -> RiskReport: ...
     async def latest_risk(self, card_id: str) -> RiskReport | None: ...
+    async def save_lineage(self, m: LineageMap) -> LineageMap: ...
+    async def latest_lineage(self, card_id: str) -> LineageMap | None: ...
 
 
 class MemoryStore:
     def __init__(self) -> None:
         self._cards: dict[str, DataCard] = {}
         self._risks: dict[str, RiskReport] = {}
+        self._maps: dict[str, LineageMap] = {}
 
     async def save(self, card: DataCard, created_by: str | None = None) -> DataCard:
         card = card.model_copy(update={"id": card.id or str(uuid.uuid4())})
@@ -49,6 +53,14 @@ class MemoryStore:
 
     async def latest_risk(self, card_id: str) -> RiskReport | None:
         return self._risks.get(card_id)
+
+    async def save_lineage(self, m: LineageMap) -> LineageMap:
+        m = m.model_copy(update={"id": m.id or str(uuid.uuid4())})
+        self._maps[m.datacard_id] = m
+        return m
+
+    async def latest_lineage(self, card_id: str) -> LineageMap | None:
+        return self._maps.get(card_id)
 
 
 def _summary(card: DataCard) -> dict:
@@ -158,6 +170,29 @@ class PostgresStore:
             )
             row = await cur.fetchone()
         return RiskReport.model_validate(row[0]) if row else None
+
+
+    async def save_lineage(self, m: LineageMap) -> LineageMap:
+        m = m.model_copy(update={"id": m.id or str(uuid.uuid4())})
+        async with await self._conn() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "insert into odr.lineage_maps (id, datacard_id, map) values (%s, %s, %s::jsonb)",
+                (m.id, m.datacard_id, m.model_dump_json()),
+            )
+            await conn.commit()
+        return m
+
+    async def latest_lineage(self, card_id: str) -> LineageMap | None:
+        try:
+            uuid.UUID(card_id)
+        except ValueError:
+            return None
+        async with await self._conn() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "select map from odr.lineage_maps where datacard_id = %s order by created_at desc limit 1", (card_id,)
+            )
+            row = await cur.fetchone()
+        return LineageMap.model_validate(row[0]) if row else None
 
 
 def make_store(dsn: str | None) -> Store:

@@ -69,6 +69,10 @@ class LineageNode(BaseModel):
     summary: str
     url: str | None = None
     area_levels: dict[str, Level] = Field(default_factory=dict)
+    analyzed: bool = False
+    description: str = ""
+    provider: str = ""
+    license: str = ""
 
 
 class RiskReport(BaseModel):

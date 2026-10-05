@@ -155,15 +155,44 @@ async def build_child(ref: DatasetRef) -> DataCard:
         return await build_card(ref, client)
 
 
-@app.post("/api/datacards/{card_id}/risk", dependencies=[Depends(require_token)])
-async def run_risk(card_id: str, depth: int = 1) -> risk.RiskReport:
-    """저장된 데이터 카드로 리스크를 (재)분석한다. 카드를 고친 뒤 다시 돌리면 반영된다. depth는 원본 계보 추적 단계(1~3)."""
+class RiskRequest(BaseModel):
+    node_ids: list[str] | None = None  # 분석할 원본(계보 지도의 노드 id). 없으면 depth 단계 이내
+
+
+@app.post("/api/datacards/{card_id}/lineage", dependencies=[Depends(require_token)])
+async def explore_lineage(card_id: str, depth: int = lineage.MAX_DEPTH) -> lineage.LineageMap:
+    """최종 원본까지 계보를 따라가며 원본별 기본 정보만 모은다(리스크 분석 없음)."""
     card = await store.get(card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다.")
+    m = await lineage.explore(card, max_depth=depth, build_child=build_child, upstreams_for=upstreams_for)
+    return await store.save_lineage(m)
+
+
+@app.get("/api/datacards/{card_id}/lineage", dependencies=[Depends(require_token)])
+async def get_lineage(card_id: str) -> lineage.LineageMap:
+    m = await store.latest_lineage(card_id)
+    if m is None:
+        raise HTTPException(status_code=404, detail="아직 원본 계보를 탐색하지 않았습니다.")
+    return m
+
+
+@app.post("/api/datacards/{card_id}/risk", dependencies=[Depends(require_token)])
+async def run_risk(card_id: str, req: RiskRequest | None = None, depth: int = 1) -> risk.RiskReport:
+    """저장된 데이터 카드로 리스크를 (재)분석한다. 카드를 고친 뒤 다시 돌리면 반영된다.
+
+    원본 계보 지도가 없으면 먼저 탐색한다. 분석할 상위 데이터셋은 node_ids로 고르고,
+    고르지 않으면 depth 단계 이내(기본 1)를 분석한다.
+    """
+    card = await store.get(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다.")
+    m = await store.latest_lineage(card_id)
+    if m is None:
+        m = await explore_lineage(card_id)
+    selected = set(req.node_ids) if req and req.node_ids is not None else lineage.default_selection(m, depth)
     rep = await reputation_area(card)
-    area, nodes = await lineage.trace(
-        card, depth=depth, areas_for=areas_for, build_child=build_child, upstreams_for=upstreams_for)
+    area, nodes = await lineage.analyze(m, selected, areas_for=areas_for, build_child=build_child)
     return await store.save_risk(risk.analyze(card, extra=[rep, area], lineage=nodes))
 
 
