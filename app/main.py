@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import extract, reputation, risk, watchlists
+from . import extract, lineage, reputation, risk, watchlists
 from .config import settings
 from .connectors import CollectContext, collect
 from .identify import identify
@@ -124,12 +124,7 @@ async def get_card(card_id: str) -> DataCard:
     return card
 
 
-@app.post("/api/datacards/{card_id}/risk", dependencies=[Depends(require_token)])
-async def run_risk(card_id: str) -> risk.RiskReport:
-    """저장된 데이터 카드로 라이선스·개인정보 리스크를 (재)분석한다. 카드를 고친 뒤 다시 돌리면 반영된다."""
-    card = await store.get(card_id)
-    if card is None:
-        raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다.")
+async def reputation_area(card: DataCard) -> risk.AreaOpinion:
     index = await watch_cache.get()
     entities = reputation.baseline_entities(card)
     if settings.anthropic_api_key:
@@ -137,8 +132,39 @@ async def run_risk(card_id: str) -> risk.RiskReport:
             entities += await run_in_threadpool(reputation.llm_entities, card, anthropic.Anthropic())
         except Exception:  # 이름 추출 실패는 기본 이름만으로 대조한다
             pass
-    area = reputation.opinion(card, index, entities)
-    return await store.save_risk(risk.analyze(card, extra=[area]))
+    return reputation.opinion(card, index, entities)
+
+
+async def areas_for(card: DataCard) -> list[risk.AreaOpinion]:
+    """한 데이터셋의 라이선스·개인정보·평판 영역 (원본 데이터셋 분석에도 같은 것을 쓴다)."""
+    return [risk.license_opinion(card), risk.privacy_opinion(card), await reputation_area(card)]
+
+
+async def upstreams_for(card: DataCard) -> list[lineage.Upstream]:
+    found = lineage.baseline_upstreams(card)
+    if settings.anthropic_api_key:
+        try:
+            found = lineage.merge(await run_in_threadpool(lineage.llm_upstreams, card, anthropic.Anthropic()), found)
+        except Exception:  # 추출 실패 시 카드에 적힌 원본만 쓴다
+            pass
+    return found
+
+
+async def build_child(ref: DatasetRef) -> DataCard:
+    async with http_client() as client:
+        return await build_card(ref, client)
+
+
+@app.post("/api/datacards/{card_id}/risk", dependencies=[Depends(require_token)])
+async def run_risk(card_id: str, depth: int = 1) -> risk.RiskReport:
+    """저장된 데이터 카드로 리스크를 (재)분석한다. 카드를 고친 뒤 다시 돌리면 반영된다. depth는 원본 계보 추적 단계(1~3)."""
+    card = await store.get(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다.")
+    rep = await reputation_area(card)
+    area, nodes = await lineage.trace(
+        card, depth=depth, areas_for=areas_for, build_child=build_child, upstreams_for=upstreams_for)
+    return await store.save_risk(risk.analyze(card, extra=[rep, area], lineage=nodes))
 
 
 @app.get("/api/datacards/{card_id}/risk", dependencies=[Depends(require_token)])
