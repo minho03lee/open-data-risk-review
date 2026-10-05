@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>오픈데이터 리스크 검토</title>
+<style>
+  :root { --bg:#fafaf9; --fg:#1c1917; --muted:#78716c; --line:#e7e5e4; --card:#fff; --ok:#15803d; --warn:#b45309; --none:#a8a29e; --user:#1d4ed8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --line:#44403c; --card:#292524; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.55 system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  form { display:flex; gap:8px; margin:20px 0; }
+  input[type=text] { flex:1; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); font-size:15px; }
+  button { padding:10px 16px; border:0; border-radius:8px; background:var(--fg); color:var(--bg); cursor:pointer; font-size:14px; }
+  button.secondary { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin:16px 0; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; vertical-align:top; padding:8px 6px; border-bottom:1px solid var(--line); }
+  th { font-weight:600; white-space:nowrap; }
+  td.val { word-break: break-word; }
+  .badge { display:inline-block; font-size:12px; padding:1px 8px; border-radius:999px; border:1px solid currentColor; white-space:nowrap; }
+  .s-확인됨 { color:var(--ok); } .s-추정 { color:var(--warn); } .s-정보\ 없음 { color:var(--none); } .s-사용자\ 입력 { color:var(--user); }
+  .cand { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); }
+  a { color: inherit; }
+  pre { white-space: pre-wrap; margin:0; font: inherit; }
+  .notice { font-size:13px; color:var(--muted); border-left:3px solid var(--line); padding-left:10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>오픈데이터 리스크 검토</h1>
+  <div class="muted">데이터셋 URL이나 이름을 넣으면 데이터 카드를 만듭니다. 법률 자문이 아닌 참고용 분석입니다.</div>
+  <form id="f">
+    <input type="text" id="q" placeholder="https://huggingface.co/datasets/allenai/c4 또는 데이터셋 이름" required>
+    <button type="submit">검토</button>
+  </form>
+  <div id="out"></div>
+  <div class="panel"><strong>최근 검토</strong><div id="recent" class="muted">불러오는 중…</div></div>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+let token = null;
+try { token = localStorage.getItem("odr_token"); } catch (e) {}
+let FIELDS = {};
+
+async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) };
+  const r = await fetch(path, { ...opts, headers });
+  if (r.status === 401) {
+    token = prompt("접근 토큰을 입력하세요");
+    try { localStorage.setItem("odr_token", token); } catch (e) {}
+    return api(path, opts);
+  }
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error("request failed"), { status: r.status, body });
+  return body;
+}
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function fmt(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return /^https?:\/\//.test(v) ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>` : `<pre>${esc(v)}</pre>`;
+  return `<pre>${esc(JSON.stringify(v, null, 2))}</pre>`;
+}
+
+function renderCard(card) {
+  let rows = "";
+  for (const [k, meta] of Object.entries(FIELDS)) {
+    const f = card.fields[k] || {};
+    rows += `<tr><th>${esc(meta.group)}<br><span class="muted">${esc(meta.label)}</span></th>
+      <td class="val">${fmt(f.value)}${f.evidence_url ? `<div class="muted">근거: <a href="${esc(f.evidence_url)}" target="_blank" rel="noopener">${esc(f.evidence_url)}</a></div>` : ""}</td>
+      <td><span class="badge s-${esc(f.status)}">${esc(f.status)}</span></td></tr>`;
+  }
+  const needs = (card.needs_documents || []).map((d) => `<li>${esc(d)}</li>`).join("");
+  const srcs = (card.sources || []).map((s) => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a> <span class="muted">${esc(s.fetched_at)}</span></li>`).join("");
+  $("#out").innerHTML = `<div class="panel">
+    <div class="muted">${esc(card.dataset.platform)} · ${esc(card.dataset.uid)} · 생성 ${esc(card.created_at)}</div>
+    <p class="notice">검토 일시 기준의 참고용 분석이며 법률 자문이 아닙니다.</p>
+    ${needs ? `<p><strong>추가로 필요한 자료</strong></p><ul>${needs}</ul>` : ""}
+    <table><thead><tr><th>항목</th><th>값</th><th>상태</th></tr></thead><tbody>${rows}</tbody></table>
+    <p><strong>출처</strong></p><ul>${srcs}</ul></div>`;
+}
+
+function renderChoice(result) {
+  const cands = (result.candidates || []).map((c, i) => `<div class="cand"><div><strong>${esc(c.title)}</strong>
+    <div class="muted">${esc(c.ref.platform)} · ${esc(c.provider || "")} · 일치도 ${c.score}</div></div>
+    <button class="secondary" data-i="${i}">이 데이터셋이 맞아요</button></div>`).join("");
+  $("#out").innerHTML = `<div class="panel"><p>${esc(result.question)}</p>${cands}</div>`;
+  $("#out").querySelectorAll("button[data-i]").forEach((b) => b.onclick = () => create({ ref: result.candidates[b.dataset.i].ref }));
+}
+
+async function create(payload) {
+  $("#out").innerHTML = `<div class="panel muted">데이터 카드를 만드는 중입니다…</div>`;
+  try {
+    renderCard(await api("/api/datacards", { method: "POST", body: JSON.stringify(payload) }));
+    loadRecent();
+  } catch (e) {
+    if (e.status === 409) return renderChoice(e.body.detail);
+    $("#out").innerHTML = `<div class="panel">${esc(e.body?.detail || "오류가 발생했습니다.")}</div>`;
+  }
+}
+
+async function loadRecent() {
+  try {
+    const items = await api("/api/datacards");
+    $("#recent").innerHTML = items.length ? items.map((i) => `<div><a href="#" data-id="${esc(i.id)}">${esc(i.name || i.dataset_uid)}</a> <span class="muted">${esc(i.created_at)}</span></div>`).join("") : "아직 없습니다.";
+    $("#recent").querySelectorAll("a[data-id]").forEach((a) => a.onclick = async (ev) => { ev.preventDefault(); renderCard(await api("/api/datacards/" + a.dataset.id)); });
+  } catch (e) { $("#recent").textContent = "불러오지 못했습니다."; }
+}
+
+$("#f").onsubmit = (ev) => { ev.preventDefault(); create({ query: $("#q").value.trim() }); };
+api("/api/card-fields").then((f) => { FIELDS = f; loadRecent(); });
+</script>
+</body>
+</html>
