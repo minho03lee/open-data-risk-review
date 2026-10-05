@@ -36,4 +36,9 @@ create table if not exists odr.source_snapshots (
 create index if not exists source_snapshots_card_idx on odr.source_snapshots (datacard_id);
 
 -- 서버(서비스 롤)만 접근. PostgREST로 노출하지 않으며 anon/authenticated 권한 없음.
+alter table odr.datasets enable row level security;
+alter table odr.datacards enable row level security;
+alter table odr.source_snapshots enable row level security;
+
 revoke all on schema odr from anon, authenticated;
+revoke all on all tables in schema odr from anon, authenticated;
