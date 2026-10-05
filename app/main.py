@@ -5,6 +5,7 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+import anthropic
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -12,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import extract, risk
+from . import extract, reputation, risk, watchlists
 from .config import settings
 from .connectors import CollectContext, collect
 from .identify import identify
@@ -21,6 +22,7 @@ from .store import make_store
 
 app = FastAPI(title="Open Data Risk Review", version="0.1.0")
 store = make_store(settings.database_url)
+watch_cache = watchlists.IndexCache(watchlists.build_index)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -128,7 +130,15 @@ async def run_risk(card_id: str) -> risk.RiskReport:
     card = await store.get(card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다.")
-    return await store.save_risk(risk.analyze(card))
+    index = await watch_cache.get()
+    entities = reputation.baseline_entities(card)
+    if settings.anthropic_api_key:
+        try:
+            entities += await run_in_threadpool(reputation.llm_entities, card, anthropic.Anthropic())
+        except Exception:  # 이름 추출 실패는 기본 이름만으로 대조한다
+            pass
+    area = reputation.opinion(card, index, entities)
+    return await store.save_risk(risk.analyze(card, extra=[area]))
 
 
 @app.get("/api/datacards/{card_id}/risk", dependencies=[Depends(require_token)])

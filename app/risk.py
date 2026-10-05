@@ -63,10 +63,7 @@ class RiskReport(BaseModel):
     dataset_uid: str
     overall: Level
     areas: list[AreaOpinion]
-    scope_note: str = (
-        "이번 분석 범위: 데이터셋 자체의 라이선스·개인정보. 평판·기타 영역과 원본 출처 계보는 아직 분석하지 않았다. "
-        "상용 모델 학습 기준의 참고용 분석이며 법률 자문이 아니다. 법역별 문구는 초안으로 법무 검토가 필요하다."
-    )
+    scope_note: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -194,6 +191,10 @@ def license_opinion(card: DataCard) -> AreaOpinion:
         findings.append(Finding(check="원본 출처 공개 여부", level=Level.unknown,
             note="원본 출처 정보를 찾지 못했다. 계보가 끊기면 데이터셋 라이선스만으로 안전하다고 볼 수 없다.",
             recommendation="논문·제작 문서에서 원본 출처를 확인해 주세요."))
+    elif _text(up.value).replace("source_datasets:", "").strip().lower() == "original":
+        findings.append(Finding(check="원본 출처 계보", level=Level.unknown, **_ev(up),
+            note="상위 데이터셋 없이 직접 만든 것으로 표기되어 있다. 웹 크롤링 등 실제 원본 출처와 그 권리 관계는 문서에서 확인하지 못했다.",
+            recommendation="논문·제작 문서에서 실제 수집 출처를 확인하세요."))
     else:
         findings.append(Finding(check="원본 출처 계보", level=Level.unknown, **_ev(up),
             note="원본 출처가 있다(" + _text(up.value)[:160] + "). 데이터셋 라이선스가 원본보다 넓지 않은지는 계보 분석 전이라 확인하지 못했다.",
@@ -369,9 +370,18 @@ def _privacy_jurisdictions(level: Level, state: str, biometric: bool) -> list[Ju
 
 # --- 종합 ----------------------------------------------------------------------
 
-def analyze(card: DataCard) -> RiskReport:
-    areas = [license_opinion(card), privacy_opinion(card)]
+def scope_note(areas: list[AreaOpinion]) -> str:
+    names = ", ".join(a.area for a in areas)
+    return (
+        f"이번 분석 범위: 데이터셋 자체의 {names}. 나머지 영역과 원본 출처 계보는 아직 분석하지 않았다. "
+        "상용 모델 학습 기준의 참고용 분석이며 법률 자문이 아니다. 법역별 문구는 초안으로 법무 검토가 필요하다."
+    )
+
+
+def analyze(card: DataCard, extra: list[AreaOpinion] | None = None) -> RiskReport:
+    """규칙 기반 영역(라이선스·개인정보)에 호출자가 만든 영역(예: 평판)을 더해 종합한다."""
+    areas = [license_opinion(card), privacy_opinion(card), *(extra or [])]
     return RiskReport(
         datacard_id=card.id or "", dataset_uid=card.dataset.uid,
-        overall=worst([a.level for a in areas]), areas=areas,
+        overall=worst([a.level for a in areas]), areas=areas, scope_note=scope_note(areas),
     )
