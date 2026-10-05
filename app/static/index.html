@@ -163,22 +163,13 @@ function renderRisk(r) {
   $("#repick").onclick = () => showPicker(new Set(r.lineage.filter((n) => n.analyzed).map((n) => n.id)));
 }
 
-function startPanel() {
-  $("#risk").innerHTML = `<div class="panel"><strong>리스크 분석</strong>
-    <p class="muted">라이선스·개인정보·평판(제재)과 원본 계보를 데이터 카드 기준으로 분석합니다. 원본 계보를 먼저 보고, 분석할 상위 데이터셋을 골라 돌릴 수 있습니다.</p>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button id="explore">원본 계보 보고 고르기</button>
-    <button class="secondary" id="runrisk">바로 분석 (원본 1단계까지)</button></div></div>`;
-  $("#explore").onclick = () => exploreLineage();
-  $("#runrisk").onclick = () => runRisk();
-}
-
 async function loadRisk(id) {
   if (!id) return;
-  try { renderRisk(await api(`/api/datacards/${id}/risk`)); }
-  catch (e) {
-    if (e.status !== 404) return;
-    startPanel();
-  }
+  try { renderRisk(await api(`/api/datacards/${id}/risk`)); return; }
+  catch (e) { if (e.status !== 404) return; }
+  // 분석 결과가 없으면 계보를 멈추지 않고 바로 보여 준다 (이미 찾아 둔 지도가 있으면 재사용)
+  try { currentMap = await api(`/api/datacards/${id}/lineage`); renderPicker(currentMap, defaultPick(currentMap, 1)); }
+  catch (e) { if (e.status === 404) exploreLineage(); }
 }
 
 async function exploreLineage() {
