@@ -73,6 +73,25 @@ class GdeltClient:
         self._lock = asyncio.Lock()
         self._last = 0.0
 
+    async def _get(self, query: str) -> dict:
+        params = {"query": query, "mode": "artlist", "format": "json", "maxrecords": MAX_RECORDS, "sort": "datedesc", "timespan": "3months"}
+        for attempt in (1, 2):
+            try:
+                async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "open-data-risk-review/1.0"}) as client:
+                    r = await client.get(GDELT_URL, params=params)
+            except httpx.HTTPError as e:
+                raise SearchError(f"{type(e).__name__}: {e}"[:120]) from e
+            if r.status_code in (429, 502, 503, 504) and attempt == 1:  # 요청 한도·일시 장애는 한 번 더 시도한다
+                await asyncio.sleep(MIN_INTERVAL + 1)
+                continue
+            if r.status_code >= 400:
+                raise SearchError(f"HTTP {r.status_code} {r.text[:80].strip()}".strip())
+            try:
+                return r.json()
+            except ValueError as e:  # 검색식 오류 등은 JSON이 아닌 문장으로 온다
+                raise SearchError(r.text[:120].strip() or "응답 형식 오류") from e
+        raise SearchError("재시도 실패")
+
     async def search(self, query: str) -> list[Article]:
         async with self._lock:
             hit = self._cache.get(query)
@@ -82,16 +101,7 @@ class GdeltClient:
             if wait > 0:
                 await asyncio.sleep(wait)
             try:
-                async with httpx.AsyncClient(timeout=15) as client:
-                    r = await client.get(GDELT_URL, params={
-                        "query": query, "mode": "artlist", "format": "json", "maxrecords": MAX_RECORDS, "sort": "datedesc", "timespan": "3months"})
-                    r.raise_for_status()
-                    try:
-                        data = r.json()
-                    except ValueError as e:  # 검색식 오류 등은 JSON이 아닌 문장으로 온다
-                        raise SearchError(r.text[:120].strip() or "응답 형식 오류") from e
-            except httpx.HTTPError as e:
-                raise SearchError(type(e).__name__) from e
+                data = await self._get(query)
             finally:
                 self._last = time.time()
             arts = [Article(title=(a.get("title") or "").strip(), url=a.get("url") or "", domain=a.get("domain") or "", seen=(a.get("seendate") or "")[:8])
