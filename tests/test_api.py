@@ -44,3 +44,17 @@ def test_token_required(monkeypatch):
     c = TestClient(main.app)
     assert c.get("/api/datacards").status_code == 401
     assert c.get("/api/datacards", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+
+
+def test_card_is_still_created_when_claude_api_fails(monkeypatch):
+    import anthropic
+    _patch_http(monkeypatch, hf_handler)
+    monkeypatch.setattr(main, "settings", main.settings.__class__(anthropic_api_key="k"))
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    err = anthropic.BadRequestError("Your credit balance is too low", response=httpx.Response(400, request=req), body=None)
+    def boom(card):
+        raise err
+    monkeypatch.setattr(main.extract, "enrich", boom)
+    r = TestClient(main.app).post("/api/datacards", json={"query": "https://huggingface.co/datasets/allenai/c4"})
+    assert r.status_code == 200, r.text
+    assert any("크레딧이 부족" in n for n in r.json()["needs_documents"])
