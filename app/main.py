@@ -9,6 +9,7 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import extract
@@ -21,6 +22,7 @@ from .store import make_store
 app = FastAPI(title="Open Data Risk Review", version="0.1.0")
 store = make_store(settings.database_url)
 STATIC = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 def require_token(authorization: str | None = Header(default=None)) -> None:

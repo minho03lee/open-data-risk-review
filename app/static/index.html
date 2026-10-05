@@ -24,8 +24,27 @@
   .badge { display:inline-block; font-size:12px; padding:1px 8px; border-radius:999px; border:1px solid currentColor; white-space:nowrap; }
   .s-확인됨 { color:var(--ok); } .s-추정 { color:var(--warn); } .s-정보\ 없음 { color:var(--none); } .s-사용자\ 입력 { color:var(--user); }
   .cand { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); }
-  a { color: inherit; }
-  pre { white-space: pre-wrap; margin:0; font: inherit; }
+  a { color: inherit; overflow-wrap: anywhere; }
+  .group { margin:18px 0 6px; font-size:13px; font-weight:600; color:var(--muted); letter-spacing:.02em; }
+  .field { display:grid; grid-template-columns: 150px 1fr auto; gap:8px 16px; padding:12px 0; border-bottom:1px solid var(--line); }
+  .field .lbl { font-weight:600; font-size:14px; }
+  .field .val { min-width:0; overflow-wrap:anywhere; }
+  .field .val > * { margin-top:0; }
+  .field .val p { margin:0 0 8px; } .field .val p:last-child { margin-bottom:0; }
+  .field .val ul { margin:0; padding-left:18px; }
+  .empty { color:var(--muted); font-style:italic; }
+  .src { font-size:12px; color:var(--muted); margin-top:6px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin:2px 0; }
+  .chip { font-size:12px; padding:2px 9px; border-radius:999px; background:var(--line); }
+  dl.kv { display:grid; grid-template-columns: max-content 1fr; gap:4px 14px; margin:0; }
+  dl.kv dt { color:var(--muted); font-size:13px; } dl.kv dd { margin:0; min-width:0; }
+  .summary { margin-bottom:8px; }
+  details { margin-top:6px; } summary { cursor:pointer; color:var(--muted); font-size:13px; }
+  .md { max-height:420px; overflow:auto; margin-top:8px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:13px; }
+  .md h4 { margin:12px 0 4px; font-size:14px; } .md h4:first-child { margin-top:0; }
+  code { font:12px ui-monospace, Menlo, monospace; background:var(--line); padding:1px 4px; border-radius:4px; }
+  pre { white-space:pre-wrap; margin:0; font:12px ui-monospace, Menlo, monospace; }
+  @media (max-width: 640px) { .field { grid-template-columns: 1fr; } }
   .notice { font-size:13px; color:var(--muted); border-left:3px solid var(--line); padding-left:10px; }
 </style>
 </head>
@@ -40,6 +59,7 @@
   <div id="out"></div>
   <div class="panel"><strong>최근 검토</strong><div id="recent" class="muted">불러오는 중…</div></div>
 </main>
+<script src="/static/render.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 let token = null;
@@ -59,29 +79,29 @@ async function api(path, opts = {}) {
   return body;
 }
 
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-function fmt(v) {
-  if (v == null) return "";
-  if (typeof v === "string") return /^https?:\/\//.test(v) ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>` : `<pre>${esc(v)}</pre>`;
-  return `<pre>${esc(JSON.stringify(v, null, 2))}</pre>`;
-}
+const esc = ODR.esc;
 
 function renderCard(card) {
-  let rows = "";
+  let body = "", group = null;
   for (const [k, meta] of Object.entries(FIELDS)) {
     const f = card.fields[k] || {};
-    rows += `<tr><th>${esc(meta.group)}<br><span class="muted">${esc(meta.label)}</span></th>
-      <td class="val">${fmt(f.value)}${f.evidence_url ? `<div class="muted">근거: <a href="${esc(f.evidence_url)}" target="_blank" rel="noopener">${esc(f.evidence_url)}</a></div>` : ""}</td>
-      <td><span class="badge s-${esc(f.status)}">${esc(f.status)}</span></td></tr>`;
+    if (meta.group !== group) { group = meta.group; body += `<div class="group">${esc(group)}</div>`; }
+    const html = ODR.value(f.value, k);
+    const ev = f.evidence_url ? `<div class="src">근거: <a href="${esc(f.evidence_url)}" target="_blank" rel="noopener" title="${esc(f.evidence_url)}">${esc(ODR.shortUrl(f.evidence_url))}</a></div>` : "";
+    body += `<div class="field"><div class="lbl">${esc(meta.label)}</div>
+      <div class="val">${html || '<span class="empty">정보 없음</span>'}${ev}</div>
+      <div><span class="badge s-${esc(f.status)}">${esc(f.status)}</span></div></div>`;
   }
-  const needs = (card.needs_documents || []).map((d) => `<li>${esc(d)}</li>`).join("");
-  const srcs = (card.sources || []).map((s) => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a> <span class="muted">${esc(s.fetched_at)}</span></li>`).join("");
+  const needs = (card.needs_documents || []).map((d) => `<li>${ODR.linkify(d)}</li>`).join("");
+  const srcs = (card.sources || []).map((s) => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener" title="${esc(s.url)}">${esc(ODR.shortUrl(s.url, 90))}</a> <span class="muted">${esc(ODR.fmtDate(s.fetched_at))}</span></li>`).join("");
+  const name = card.fields.name?.value?.official || card.dataset.repo;
   $("#out").innerHTML = `<div class="panel">
-    <div class="muted">${esc(card.dataset.platform)} · ${esc(card.dataset.uid)} · 생성 ${esc(card.created_at)}</div>
+    <h2 style="margin:0 0 2px;font-size:20px">${esc(name)}</h2>
+    <div class="muted">${esc(card.dataset.platform)} · ${esc(card.dataset.repo)}${card.dataset.revision ? ` · 리비전 ${esc(card.dataset.revision.slice(0, 10))}` : ""} · 생성 ${esc(ODR.fmtDate(card.created_at))}</div>
     <p class="notice">검토 일시 기준의 참고용 분석이며 법률 자문이 아닙니다.</p>
-    ${needs ? `<p><strong>추가로 필요한 자료</strong></p><ul>${needs}</ul>` : ""}
-    <table><thead><tr><th>항목</th><th>값</th><th>상태</th></tr></thead><tbody>${rows}</tbody></table>
-    <p><strong>출처</strong></p><ul>${srcs}</ul></div>`;
+    ${needs ? `<div class="group">추가로 필요한 자료</div><ul>${needs}</ul>` : ""}
+    ${body}
+    <div class="group">출처</div><ul>${srcs}</ul></div>`;
 }
 
 function renderChoice(result) {
