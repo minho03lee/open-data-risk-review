@@ -1,0 +1,22 @@
+# 새 Render 웹 서비스. 기존 ai-lawsuit-monitor 서비스와는 별개이며 설정을 공유하지 않는다.
+services:
+  - type: web
+    name: open-data-risk-review
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_URL        # Supabase Postgres 연결 문자열 (odr 스키마 사용)
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: APP_ACCESS_TOKEN    # 사내 SSO 연동 전 임시 공유 토큰
+        sync: false
+      - key: KAGGLE_USERNAME
+        sync: false
+      - key: KAGGLE_KEY
+        sync: false

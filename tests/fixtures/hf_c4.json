@@ -1,0 +1,5 @@
+{"_id":"x","id":"allenai/c4","author":"allenai","sha":"1588ec454efa1a09f29cd18ddd04fe05fc8653a2","lastModified":"2024-01-09T19:14:03.000Z","createdAt":"2022-03-02T23:29:22.000Z","private":false,"gated":false,"disabled":false,"usedStorage":13450000000000,
+"tags":["task_categories:text-generation","language:en","license:odc-by","size_categories:100M<n<1B","modality:text","arxiv:1910.10683","source_datasets:original"],
+"cardData":{"pretty_name":"C4","license":["odc-by"],"language":["en","af"],"size_categories":["100M<n<1B"],"source_datasets":["original"]},
+"citation":"@article{2019t5, title={Exploring the Limits of Transfer Learning}}",
+"siblings":[{"rfilename":"README.md"},{"rfilename":"LICENSE"}]}
