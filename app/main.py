@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import extract, lineage, others, reputation, risk, watchlists
+from . import extract, lineage, news, others, reputation, risk, watchlists
 from .config import settings
 from .connectors import CollectContext, collect
 from .identify import identify
@@ -23,6 +23,7 @@ from .store import make_store
 app = FastAPI(title="Open Data Risk Review", version="0.1.0")
 store = make_store(settings.database_url)
 watch_cache = watchlists.IndexCache(watchlists.build_index)
+gdelt = news.GdeltClient()
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -124,7 +125,7 @@ async def get_card(card_id: str) -> DataCard:
     return card
 
 
-async def reputation_area(card: DataCard) -> risk.AreaOpinion:
+async def reputation_area(card: DataCard, with_news: bool = True) -> risk.AreaOpinion:
     index = await watch_cache.get()
     entities = reputation.baseline_entities(card)
     if settings.anthropic_api_key:
@@ -132,12 +133,16 @@ async def reputation_area(card: DataCard) -> risk.AreaOpinion:
             entities += await run_in_threadpool(reputation.llm_entities, card, anthropic.Anthropic())
         except Exception:  # 이름 추출 실패는 기본 이름만으로 대조한다
             pass
-    return reputation.opinion(card, index, entities)
+    found = None
+    if with_news:  # 뉴스는 검토 대상 데이터셋에만 쓴다(원본 노드마다 검색하면 호출이 너무 많아진다)
+        names = [e.name for e in entities if e.role in reputation.DIRECT_ROLES]
+        found = await news.news_findings(card, names, gdelt.search)
+    return reputation.opinion(card, index, entities, found)
 
 
 async def areas_for(card: DataCard) -> list[risk.AreaOpinion]:
     """한 데이터셋의 라이선스·개인정보·평판·기타 영역 (원본 데이터셋 분석에도 같은 것을 쓴다)."""
-    return [risk.license_opinion(card), risk.privacy_opinion(card), await reputation_area(card), others.other_opinion(card)]
+    return [risk.license_opinion(card), risk.privacy_opinion(card), await reputation_area(card, with_news=False), others.other_opinion(card)]
 
 
 async def upstreams_for(card: DataCard) -> list[lineage.Upstream]:
