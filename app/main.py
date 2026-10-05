@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import extract, lineage, reputation, risk, watchlists
+from . import extract, lineage, others, reputation, risk, watchlists
 from .config import settings
 from .connectors import CollectContext, collect
 from .identify import identify
@@ -136,8 +136,8 @@ async def reputation_area(card: DataCard) -> risk.AreaOpinion:
 
 
 async def areas_for(card: DataCard) -> list[risk.AreaOpinion]:
-    """한 데이터셋의 라이선스·개인정보·평판 영역 (원본 데이터셋 분석에도 같은 것을 쓴다)."""
-    return [risk.license_opinion(card), risk.privacy_opinion(card), await reputation_area(card)]
+    """한 데이터셋의 라이선스·개인정보·평판·기타 영역 (원본 데이터셋 분석에도 같은 것을 쓴다)."""
+    return [risk.license_opinion(card), risk.privacy_opinion(card), await reputation_area(card), others.other_opinion(card)]
 
 
 async def upstreams_for(card: DataCard) -> list[lineage.Upstream]:
@@ -193,7 +193,7 @@ async def run_risk(card_id: str, req: RiskRequest | None = None, depth: int = 1)
     selected = set(req.node_ids) if req and req.node_ids is not None else lineage.default_selection(m, depth)
     rep = await reputation_area(card)
     area, nodes = await lineage.analyze(m, selected, areas_for=areas_for, build_child=build_child)
-    return await store.save_risk(risk.analyze(card, extra=[rep, area], lineage=nodes))
+    return await store.save_risk(risk.analyze(card, extra=[rep, others.other_opinion(card), area], lineage=nodes))
 
 
 @app.get("/api/datacards/{card_id}/risk", dependencies=[Depends(require_token)])
