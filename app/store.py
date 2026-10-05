@@ -6,6 +6,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from typing import Protocol
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .models import DataCard
 
@@ -55,9 +56,16 @@ def _card_json(card: DataCard) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
+def clean_dsn(dsn: str) -> str:
+    """Supabase 연결 문자열의 `pgbouncer=true`는 libpq가 모르는 옵션이라 제거한다."""
+    parts = urlsplit(dsn.strip().strip("\"'"))
+    query = [(k, v) for k, v in parse_qsl(parts.query) if k != "pgbouncer"]
+    return urlunsplit(parts._replace(query=urlencode(query)))
+
+
 class PostgresStore:
     def __init__(self, dsn: str) -> None:
-        self.dsn = dsn
+        self.dsn = clean_dsn(dsn)
 
     async def _conn(self):
         import psycopg
