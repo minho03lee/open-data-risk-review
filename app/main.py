@@ -75,6 +75,13 @@ async def api_identify(req: IdentifyRequest) -> IdentifyResult:
         return await identify(client, req.query, settings.kaggle_auth)
 
 
+def _api_error_text(e: anthropic.APIError) -> str:
+    msg = getattr(e, "message", "") or str(e)
+    if "credit balance" in msg:
+        return "Anthropic API 크레딧이 부족합니다. Plans & Billing에서 충전해 주세요."
+    return f"{type(e).__name__}: {msg[:150]}"
+
+
 async def build_card(ref: DatasetRef, client: httpx.AsyncClient) -> DataCard:
     ctx = CollectContext(client=client, kaggle_auth=settings.kaggle_auth)
     try:
@@ -90,7 +97,10 @@ async def build_card(ref: DatasetRef, client: httpx.AsyncClient) -> DataCard:
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"수집 실패: {e}") from e
     if settings.anthropic_api_key:
-        card = await run_in_threadpool(extract.enrich, card)
+        try:
+            card = await run_in_threadpool(extract.enrich, card)
+        except anthropic.APIError as e:  # 크레딧 부족·한도·장애여도 수집한 기본 정보로 카드는 만든다
+            card.needs_documents.append(f"Claude API 호출이 실패해 문서 기반 항목 추출을 건너뛰었습니다: {_api_error_text(e)}")
     else:
         card.needs_documents.append("ANTHROPIC_API_KEY가 없어 문서 기반 항목 추출을 건너뛰었습니다.")
     return card
