@@ -135,7 +135,7 @@ def test_risk_api_roundtrip(monkeypatch):
     assert c.get(f"/api/datacards/{saved.id}/risk").status_code == 404
     r = c.post(f"/api/datacards/{saved.id}/risk")
     assert r.status_code == 200, r.text
-    assert [a["area"] for a in r.json()["areas"]] == ["라이선스", "개인정보", "평판(제재)", "원본 계보"]
+    assert [a["area"] for a in r.json()["areas"]] == ["라이선스", "개인정보", "평판(제재)", "기타", "원본 계보"]
     assert c.get(f"/api/datacards/{saved.id}/risk").json()["id"] == r.json()["id"]
     assert c.post("/api/datacards/nope/risk").status_code == 404
 
