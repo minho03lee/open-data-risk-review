@@ -57,12 +57,27 @@ class AreaOpinion(BaseModel):
     not_checked: list[str] = Field(default_factory=list)
 
 
+class LineageNode(BaseModel):
+    """원본 계보의 한 노드. 상위 노드는 하위 노드의 가장 높은 등급을 따른다."""
+
+    id: str
+    parent_id: str | None = None
+    name: str
+    kind: str
+    depth: int
+    level: Level
+    summary: str
+    url: str | None = None
+    area_levels: dict[str, Level] = Field(default_factory=dict)
+
+
 class RiskReport(BaseModel):
     id: str | None = None
     datacard_id: str
     dataset_uid: str
     overall: Level
     areas: list[AreaOpinion]
+    lineage: list[LineageNode] = Field(default_factory=list)
     scope_note: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -118,7 +133,7 @@ def license_opinion(card: DataCard) -> AreaOpinion:
     f = card.fields
     lic = f["license"]
     findings: list[Finding] = []
-    not_checked = ["원본 저작물의 저작권 상태와 계보 내 라이선스 충돌 (계보 분석 단계)", "저작권 소송·철회 보도 검색 (평판·기타 단계)"]
+    not_checked = ["원본 저작물의 저작권 상태와 계보 내 라이선스 충돌 ('원본 계보' 영역 참고)", "저작권 소송·철회 보도 검색 (평판·기타 단계)"]
 
     spdx, custom = ([], []) if lic.is_missing else _license_ids(lic)
 
@@ -197,7 +212,7 @@ def license_opinion(card: DataCard) -> AreaOpinion:
             recommendation="논문·제작 문서에서 실제 수집 출처를 확인하세요."))
     else:
         findings.append(Finding(check="원본 출처 계보", level=Level.unknown, **_ev(up),
-            note="원본 출처가 있다(" + _text(up.value)[:160] + "). 데이터셋 라이선스가 원본보다 넓지 않은지는 계보 분석 전이라 확인하지 못했다.",
+            note="원본 출처가 있다(" + _text(up.value)[:160] + "). 데이터셋 라이선스가 원본보다 넓지 않은지는 '원본 계보' 영역 결과로 확인한다.",
             recommendation="원본 출처별 라이선스와 약관을 확인하세요."))
 
     # 7. 분쟁 이력 (카드에 있을 때만)
@@ -278,7 +293,7 @@ def privacy_opinion(card: DataCard) -> AreaOpinion:
     type_text = _text(types.value)
     media = _has(_text(f["data_type"].value), *_MEDIA_TYPES)
     findings: list[Finding] = []
-    not_checked = ["공개 샘플 대상 개인정보 탐지(PII 패턴·얼굴 검출) (운영 단계)", "원본 출처의 개인정보 (계보 분석 단계)"]
+    not_checked = ["공개 샘플 대상 개인정보 탐지(PII 패턴·얼굴 검출) (운영 단계)", "원본 출처의 개인정보 ('원본 계보' 영역 참고)"]
 
     # 1. 포함 여부
     base = {"포함": Level.high, "가능성": Level.medium, "미포함": Level.low, "불명": Level.unknown}[state]
@@ -373,15 +388,15 @@ def _privacy_jurisdictions(level: Level, state: str, biometric: bool) -> list[Ju
 def scope_note(areas: list[AreaOpinion]) -> str:
     names = ", ".join(a.area for a in areas)
     return (
-        f"이번 분석 범위: 데이터셋 자체의 {names}. 나머지 영역과 원본 출처 계보는 아직 분석하지 않았다. "
+        f"이번 분석 범위: {names}. 나머지 영역은 아직 분석하지 않았다. "
         "상용 모델 학습 기준의 참고용 분석이며 법률 자문이 아니다. 법역별 문구는 초안으로 법무 검토가 필요하다."
     )
 
 
-def analyze(card: DataCard, extra: list[AreaOpinion] | None = None) -> RiskReport:
-    """규칙 기반 영역(라이선스·개인정보)에 호출자가 만든 영역(예: 평판)을 더해 종합한다."""
+def analyze(card: DataCard, extra: list[AreaOpinion] | None = None, lineage: list[LineageNode] | None = None) -> RiskReport:
+    """규칙 기반 영역(라이선스·개인정보)에 호출자가 만든 영역(예: 평판·계보)을 더해 종합한다."""
     areas = [license_opinion(card), privacy_opinion(card), *(extra or [])]
     return RiskReport(
         datacard_id=card.id or "", dataset_uid=card.dataset.uid,
-        overall=worst([a.level for a in areas]), areas=areas, scope_note=scope_note(areas),
+        overall=worst([a.level for a in areas]), areas=areas, lineage=lineage or [], scope_note=scope_note(areas),
     )
