@@ -128,3 +128,17 @@ def test_reputation_area_merges_news_and_drops_not_checked():
     assert hit in with_news.findings
     assert not any(x.startswith("언론 보도") for x in with_news.not_checked)
     assert with_news.level in (Level.medium, Level.high)
+
+
+async def test_gdelt_retries_once_on_429_and_reports_status(monkeypatch):
+    seq = iter([429, 200])
+    def ok(req):
+        return httpx.Response(next(seq), json={"articles": [{"title": "T", "url": "https://n/1"}]})
+    real = httpx.AsyncClient
+    monkeypatch.setattr(news.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(ok)))
+    monkeypatch.setattr(news, "MIN_INTERVAL", 0)
+    assert [a.title for a in await news.GdeltClient().search('"x"')] == ["T"]
+
+    monkeypatch.setattr(news.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(lambda r: httpx.Response(403, text="forbidden"))))
+    with pytest.raises(news.SearchError, match="HTTP 403 forbidden"):
+        await news.GdeltClient().search('"y"')
