@@ -210,18 +210,19 @@ function pickerTree(m, parent = null) {
 }
 
 function renderPicker(m, selected) {
+  const canPick = m.nodes.some(pickable);
   const maxDepth = Math.max(1, ...m.nodes.map((n) => n.depth));
   const quick = [...Array(maxDepth).keys()].map((i) => `<button class="secondary" data-d="${i + 1}">${i + 1}단계까지</button>`).join("");
   $("#risk").innerHTML = `<div class="panel"><h2 style="margin:0 0 4px;font-size:20px">원본 계보</h2>
     <p class="muted">${m.nodes.length ? `원본 ${m.nodes.length}개를 최종 원본(${m.max_depth}단계)까지 찾았습니다. 리스크 분석은 아직 하지 않았습니다. 분석할 상위 데이터셋을 고르세요. 선택하지 않은 원본은 낮음으로 보지 않고 \"확인 필요\"로 표시됩니다.` : "원본을 찾지 못했습니다. 계보가 끊기는 지점은 그 자체로 중간 이상 리스크로 봅니다."}</p>
-    ${m.nodes.length && !m.nodes.some(pickable) ? `<p class="notice">이 계보에는 직접 고를 수 있는 상위 데이터셋이 없습니다. 각 원본 옆의 이유를 확인하세요. 아래 버튼으로 분석하면 유형별 규칙으로 평가합니다.</p>` : ""}
+    ${m.nodes.length && !m.nodes.some(pickable) ? `<p class="notice">이 계보에는 직접 고를 수 있는 상위 데이터셋이 없습니다. 각 원본 옆의 이유를 확인하세요. 웹 크롤링 등은 유형별 규칙으로, 확인하지 못한 원본은 "확인 필요"로 평가합니다.</p>` : ""}
     ${pickerTree(m)}
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">${quick}
-      <button class="secondary" data-d="all">전체 선택</button><button class="secondary" data-d="0">선택 해제</button></div>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button id="go">선택한 원본으로 리스크 분석</button>
+    ${canPick ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">${quick}
+      <button class="secondary" data-d="all">전체 선택</button><button class="secondary" data-d="0">선택 해제</button></div>` : ""}
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button id="go">${canPick ? "선택한 원본으로 리스크 분석" : "리스크 분석 시작"}</button>
       <span class="muted" id="cnt"></span><button class="secondary" id="reexplore">계보 다시 찾기</button></div></div>`;
   const boxes = [...$("#risk").querySelectorAll("input[type=checkbox]")];
-  const count = () => { $("#cnt").textContent = `${boxes.filter((b) => b.checked).length}개 선택 (상위 데이터셋 ${boxes.length}개 중)`; };
+  const count = () => { if (!canPick) { $("#cnt").textContent = ""; return; } $("#cnt").textContent = `${boxes.filter((b) => b.checked).length}개 선택 (상위 데이터셋 ${boxes.length}개 중)`; };
   boxes.forEach((b) => { b.checked = selected.has(b.dataset.id); b.onchange = count; });
   $("#risk").querySelectorAll("button[data-d]").forEach((btn) => btn.onclick = () => {
     const d = btn.dataset.d;
