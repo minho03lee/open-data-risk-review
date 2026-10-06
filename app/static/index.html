@@ -188,6 +188,10 @@ async function showPicker(selected) {
 
 let currentMap = null;
 const pickable = (n) => n.kind === "데이터셋" && n.status === "확인됨";
+const whyNoPick = (n) => n.kind !== "데이터셋"
+  ? `데이터셋이 아니라 '${n.kind}' 유형이라, 데이터셋 문서를 읽는 대신 유형별 규칙으로 자동 평가합니다.`
+  : ({ "확인 불가": "상위 데이터셋을 하나로 특정하지 못했습니다.", "접근 실패": "상위 데이터셋 페이지에 접근하지 못했습니다(비공개이거나 일시 오류).",
+       "중복": "이미 계보에 나온 데이터셋입니다.", "추적 생략": "계보가 너무 커서 더 탐색하지 않았습니다." }[n.status] || `상태: ${n.status}`);
 const defaultPick = (m, depth) => new Set(m.nodes.filter((n) => pickable(n) && n.depth <= depth).map((n) => n.id));
 
 function pickerTree(m, parent = null) {
@@ -196,12 +200,12 @@ function pickerTree(m, parent = null) {
   return `<ul class="tree${parent ? "" : " root"}">${kids.map((n) => {
     const meta = [n.provider && `제공자 ${n.provider}`, n.license && `라이선스 표기 ${n.license}`].filter(Boolean).join(" · ");
     const name = n.url ? `<a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.name)}</a>` : esc(n.name);
-    return `<li><div class="pick">${pickable(n) ? `<input type="checkbox" data-id="${esc(n.id)}" data-depth="${n.depth}" aria-label="${esc(n.name)} 분석">` : `<span class="nopick" title="유형별 규칙으로 자동 평가"></span>`}
+    return `<li><div class="pick">${pickable(n) ? `<input type="checkbox" data-id="${esc(n.id)}" data-depth="${n.depth}" aria-label="${esc(n.name)} 분석">` : `<span class="nopick" title="${esc(whyNoPick(n))}">—</span>`}
       <div><span class="nm">${name}</span> <span class="kd">${esc(n.kind)} · ${n.depth}단계</span>${n.status !== "확인됨" ? ` <span class="kd">· ${esc(n.status)}</span>` : ""}
       ${n.description ? `<div class="muted">${esc(n.description)}</div>` : ""}
       ${meta ? `<div class="muted">${esc(meta)}</div>` : ""}
       ${n.note ? `<div class="muted">${esc(n.note)}</div>` : ""}
-      ${n.kind !== "데이터셋" ? `<div class="muted">분석 시 유형별 규칙으로 자동 평가됩니다.</div>` : ""}</div></div>${pickerTree(m, n.id)}</li>`;
+      ${!pickable(n) ? `<div class="muted">선택할 수 없는 이유: ${esc(whyNoPick(n))}</div>` : ""}</div></div>${pickerTree(m, n.id)}</li>`;
   }).join("")}</ul>`;
 }
 
@@ -210,6 +214,7 @@ function renderPicker(m, selected) {
   const quick = [...Array(maxDepth).keys()].map((i) => `<button class="secondary" data-d="${i + 1}">${i + 1}단계까지</button>`).join("");
   $("#risk").innerHTML = `<div class="panel"><h2 style="margin:0 0 4px;font-size:20px">원본 계보</h2>
     <p class="muted">${m.nodes.length ? `원본 ${m.nodes.length}개를 최종 원본(${m.max_depth}단계)까지 찾았습니다. 리스크 분석은 아직 하지 않았습니다. 분석할 상위 데이터셋을 고르세요. 선택하지 않은 원본은 낮음으로 보지 않고 \"확인 필요\"로 표시됩니다.` : "원본을 찾지 못했습니다. 계보가 끊기는 지점은 그 자체로 중간 이상 리스크로 봅니다."}</p>
+    ${m.nodes.length && !m.nodes.some(pickable) ? `<p class="notice">이 계보에는 직접 고를 수 있는 상위 데이터셋이 없습니다. 각 원본 옆의 이유를 확인하세요. 아래 버튼으로 분석하면 유형별 규칙으로 평가합니다.</p>` : ""}
     ${pickerTree(m)}
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">${quick}
       <button class="secondary" data-d="all">전체 선택</button><button class="secondary" data-d="0">선택 해제</button></div>
