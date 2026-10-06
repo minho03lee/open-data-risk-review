@@ -139,6 +139,16 @@ function renderTree(nodes, parent = null) {
   }).join("")}</ul>`;
 }
 
+function renderOpinion(o) {
+  if (!o) return "";
+  const pts = (a) => a.points.length ? a.points.map((p) => `<li>${lv(p.level)} <strong>${esc(p.check)}</strong> ${esc(p.text)}${p.evidence_url ? ` <span class="src">근거: <a href="${esc(p.evidence_url)}" target="_blank" rel="noopener">${esc(ODR.shortUrl(p.evidence_url, 40))}</a></span>` : ""}</li>`).join("") : `<li class="muted">두드러진 쟁점이 없습니다.</li>`;
+  return `<div class="area opinion"><h3>종합 의견 ${lv(o.level)}</h3>
+    <p>${esc(o.verdict)}</p>
+    ${o.areas.map((a) => `<div class="group">${esc(a.area)} ${lv(a.level)}</div><div>${esc(a.headline)}</div><ul>${pts(a)}</ul>`).join("")}
+    ${o.priorities.length ? `<div class="group">먼저 할 일</div><ol>${o.priorities.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : ""}
+    <details><summary>한계와 아직 확인하지 않은 것 ${o.caveats.length}건</summary><ul>${o.caveats.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details></div>`;
+}
+
 function renderRisk(r) {
   const areas = r.areas.map((a) => `<div class="area">
     <h3>${esc(a.area)} ${lv(a.level)}</h3>
@@ -155,6 +165,7 @@ function renderRisk(r) {
   $("#risk").innerHTML = `<div class="panel"><h2 style="margin:0 0 4px;font-size:20px">리스크 분석 ${lv(r.overall)}</h2>
     <div class="muted">분석 ${esc(ODR.fmtDate(r.created_at))} · 종합 등급은 가장 높은 영역을 따릅니다</div>
     <p class="notice">${esc(r.scope_note)}</p>
+    ${renderOpinion(r.opinion)}
     ${r.lineage && r.lineage.length ? `<div class="area"><h3>원본 계보 트리</h3>${renderTree(r.lineage)}</div>` : ""}
     ${areas}
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="secondary" id="rerun">카드를 고친 뒤 다시 분석</button>

@@ -83,6 +83,7 @@ class RiskReport(BaseModel):
     areas: list[AreaOpinion]
     lineage: list[LineageNode] = Field(default_factory=list)
     scope_note: str = ""
+    opinion: dict | None = None  # app.summary.OverallOpinion을 dict로 저장한 종합 의견 (이전 리포트에는 없을 수 있다)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -399,8 +400,11 @@ def scope_note(areas: list[AreaOpinion]) -> str:
 
 def analyze(card: DataCard, extra: list[AreaOpinion] | None = None, lineage: list[LineageNode] | None = None) -> RiskReport:
     """규칙 기반 영역(라이선스·개인정보)에 호출자가 만든 영역(예: 평판·계보)을 더해 종합한다."""
+    from .summary import summarize  # summary가 이 모듈을 가져오므로 함수 안에서 가져온다
+
     areas = [license_opinion(card), privacy_opinion(card), *(extra or [])]
     return RiskReport(
         datacard_id=card.id or "", dataset_uid=card.dataset.uid,
         overall=worst([a.level for a in areas]), areas=areas, lineage=lineage or [], scope_note=scope_note(areas),
+        opinion=summarize(areas, lineage).model_dump(mode="json"),
     )

@@ -58,3 +58,15 @@ def test_card_is_still_created_when_claude_api_fails(monkeypatch):
     r = TestClient(main.app).post("/api/datacards", json={"query": "https://huggingface.co/datasets/allenai/c4"})
     assert r.status_code == 200, r.text
     assert any("크레딧이 부족" in n for n in r.json()["needs_documents"])
+
+
+def test_old_report_without_opinion_gets_one_when_read(monkeypatch):
+    import asyncio
+    from app import risk
+    from app.models import DataCard, DatasetRef, Platform
+    card = DataCard(id="old-report-card", dataset=DatasetRef(platform=Platform.huggingface, repo="a/old"))
+    old = risk.analyze(card)
+    old.opinion = None
+    asyncio.run(main.store.save_risk(old))
+    got = TestClient(main.app).get("/api/datacards/old-report-card/risk").json()
+    assert got["opinion"]["level"] == old.overall.value and got["opinion"]["caveats"]
