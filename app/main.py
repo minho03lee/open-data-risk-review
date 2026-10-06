@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import extract, lineage, news, others, reputation, risk, watchlists
+from . import extract, lineage, news, others, reputation, risk, summary, watchlists
 from .config import settings
 from .connectors import CollectContext, collect
 from .identify import identify
@@ -216,6 +216,8 @@ async def get_risk(card_id: str) -> risk.RiskReport:
     report = await store.latest_risk(card_id)
     if report is None:
         raise HTTPException(status_code=404, detail="아직 리스크 분석을 하지 않았습니다.")
+    if report.opinion is None:  # 종합 의견이 생기기 전에 만든 리포트도 저장된 결과로 바로 정리해 보여 준다
+        report.opinion = summary.summarize(report.areas, report.lineage).model_dump(mode="json")
     return report
 
 
