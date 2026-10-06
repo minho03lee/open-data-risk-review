@@ -52,6 +52,8 @@ SYSTEM = """당신은 AI 학습용 데이터셋이 어떤 원본에서 만들어
 문서(<document> 태그)에 적힌 원본만, 적힌 표기 그대로 냅니다. 추측하지 않습니다.
 유형: 데이터셋(상위·재사용 데이터셋), 웹 크롤링(Common Crawl 등 웹 수집), 플랫폼 콘텐츠(YouTube·Reddit·X·GitHub 등 특정 플랫폼),
 출판물·저작물(도서·논문·음원·이미지), 합성 데이터(모델) — 이름에는 생성 모델을 쓰고, 직접 수집(녹음·촬영·설문), 기타.
+검색엔진(Google·Bing 등)이나 사진·영상 공유 플랫폼(Flickr·YouTube 등)에서 검색하거나 내려받아 모았다고 적혀 있으면,
+각 검색엔진과 플랫폼을 따로 '플랫폼 콘텐츠' 원본으로 냅니다(이름은 문서의 표기 그대로, 예: Google, Flickr).
 url은 문서에 적힌 경우에만 쓰고 없으면 null, evidence_url은 이름이 실린 문서의 url 속성 그대로,
 evidence_quote는 그 문서의 원문을 글자 그대로 짧게 인용합니다. 이 데이터셋 자신은 제외합니다."""
 
@@ -69,6 +71,26 @@ RULES: dict[str, tuple[Level, str, str]] = {
                 "논문·카드의 동의 절차 서술을 확인하세요."),
     "기타": (Level.unknown, "원본 유형을 판별하지 못했다.", "제작 문서에서 원본 출처를 확인하세요."),
 }
+
+
+# 이름에 이 낱말이 들어 있는 플랫폼·검색엔진 콘텐츠에 쓰는 초안 규칙. 법무 검토 전 초안이다.
+PLATFORM_RULES: list[tuple[tuple[str, ...], tuple[Level, str, str]]] = [
+    (("google", "bing", "baidu", "yahoo", "duckduckgo", "naver", "검색엔진", "image search", "이미지 검색"),
+     (Level.high, "검색엔진 결과로 모은 이미지는 검색엔진이 이용 허락을 주는 것이 아니라 각 이미지의 저작권자에게 권리가 남아 있고, 개별 사이트의 약관도 적용된다. 상용 모델 학습에는 높은 리스크로 본다.",
+      "수집 대상 사이트·이미지별 라이선스를 확인하고, 라이선스가 명시된 이미지만 쓰는 방안을 검토하세요.")),
+    (("flickr",),
+     (Level.medium, "Flickr 사진은 사진마다 라이선스가 다르다(CC 여러 종류 또는 모든 권리 보유). 상업적 이용·AI 학습 허용 여부와 Flickr 약관·API 조건을 개별로 확인해야 한다.",
+      "사진별 라이선스 필터(상업적 이용 허용 CC 등) 적용 여부와 Flickr 약관을 확인하세요.")),
+]
+
+
+def rule_for(name: str, kind: str) -> tuple[Level, str, str]:
+    low = name.lower()
+    if kind in ("플랫폼 콘텐츠", "웹 크롤링", "출판물·저작물"):
+        for words, rule in PLATFORM_RULES:
+            if any(w in low for w in words):
+                return rule
+    return RULES.get(kind, RULES["기타"])
 
 
 def _flat(v) -> list[str]:
@@ -294,7 +316,7 @@ async def analyze(
         analyzed = False
         area_levels: dict[str, Level] = {}
         if n.kind != "데이터셋":
-            own, summary = RULES.get(n.kind, RULES["기타"])[:2]
+            own, summary = rule_for(n.name, n.kind)[:2]
         elif n.status == "확인됨" and n.id in selected:
             got = areas.get(n.id)
             if isinstance(got, Exception):
@@ -328,7 +350,7 @@ async def analyze(
         if n.parent_id is not None:
             continue
         node = out[n.id]
-        rec = RULES[n.kind][2] if n.kind in RULES and n.kind != "데이터셋" else "상위 데이터셋의 라이선스·개인정보 결과를 확인하세요."
+        rec = rule_for(n.name, n.kind)[2] if n.kind != "데이터셋" else "상위 데이터셋의 라이선스·개인정보 결과를 확인하세요."
         findings.append(Finding(check=f"원본: {n.name} ({n.kind})", level=node.level, note=node.summary,
                                 evidence_url=n.evidence_url or n.url, evidence_quote=n.evidence_quote,
                                 recommendation=rec if node.level != Level.low else None))

@@ -87,3 +87,27 @@ async def test_web_page():
         card = await collect(CollectContext(client=client), parse_url("https://example.org/corpus"))
     assert card.fields["name"].status == FieldStatus.inferred
     assert "License: CC BY 4.0" in card.sources[0].content
+
+
+async def test_web_page_follows_about_and_terms_links():
+    home = '<html><head><title>Imagey</title></head><body><a href="/about.php">About</a> <a href="/download">Download</a> <a href="https://other.com/terms">외부</a> <a href="/img/logo.png">로고</a> <a href="/blog/2020">Blog</a></body></html>'
+    pages = {"/": home, "/about.php": "<p>Images were collected from search engines such as Google and Flickr.</p>", "/download": "<p>Terms of access</p>"}
+
+    def handler(req):
+        body = pages.get(req.url.path)
+        return httpx.Response(200, html=body) if body else httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        card = await collect(CollectContext(client=client), parse_url("https://imagey.org/"))
+    urls = [s.url for s in card.sources]
+    assert urls == ["https://imagey.org/", "https://imagey.org/about.php", "https://imagey.org/download"]
+    assert "Google and Flickr" in card.sources[1].content
+
+
+async def test_web_page_survives_unreadable_subpage():
+    home = '<html><body><a href="/about">About</a></body></html>'
+    def handler(req):
+        return httpx.Response(200, html=home) if req.url.path == "/" else httpx.Response(500)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        card = await collect(CollectContext(client=client), parse_url("https://imagey.org/"))
+    assert len(card.sources) == 1
