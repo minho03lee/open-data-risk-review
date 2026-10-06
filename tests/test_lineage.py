@@ -175,3 +175,12 @@ def test_llm_upstreams_drop_names_not_in_documents():
     client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(parse=lambda **kw: SimpleNamespace(parsed_output=parsed))))
     got = ln.llm_upstreams(c, client)
     assert [u.name for u in got] == ["Common Crawl"] and got[0].url is None  # 문서에 없는 URL도 버린다
+
+
+def test_search_engine_and_flickr_get_platform_rules():
+    from app.lineage import rule_for
+    assert rule_for("Google image search", "플랫폼 콘텐츠")[0] == Level.high
+    assert rule_for("Flickr", "플랫폼 콘텐츠")[0] == Level.medium
+    assert "Flickr" in rule_for("Flickr", "플랫폼 콘텐츠")[1]
+    assert rule_for("YouTube", "플랫폼 콘텐츠")[0] == Level.medium  # 규칙이 없는 플랫폼은 기본 규칙
+    assert rule_for("Google's C4 dataset", "데이터셋") == rule_for("x", "데이터셋")  # 데이터셋 유형에는 적용하지 않는다
